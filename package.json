@@ -1,0 +1,13 @@
+{
+  "name": "agent-hq",
+  "version": "1.0.0",
+  "description": "Pixel-office dashboard for every Claude Code session running on this machine",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

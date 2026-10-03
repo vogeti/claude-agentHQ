@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Office</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12141f; --floor: #1b1e2e; --floor-line: #232741; --panel: #171a29;
+    --ink: #e6e8f2; --dim: #8a90ad; --line: #2c3150;
+    --work: #3ee08f; --idle: #8a90ad; --attn: #ff4d5e; --done: #5aa9ff;
+    --wood: #b87842; --wood-dark: #8a5530;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 13px; overflow: hidden;
+    display: flex; flex-direction: column; height: 100vh; }
+  .pixel { font-family: 'Press Start 2P', monospace; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* Top bar */
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-shrink: 0; padding: 10px 18px; border-bottom: 2px solid var(--line); background: #0e1018; }
+  header h1 { font-size: 12px; margin: 0; letter-spacing: 1px; white-space: nowrap; }
+  #filters { display: flex; gap: 6px; }
+  .stats { display: flex; gap: 14px; color: var(--dim); white-space: nowrap; }
+  .stats b { color: var(--ink); }
+  .dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; }
+  .spacer { flex: 1; }
+  .search { background: var(--panel); border: 2px solid var(--line); color: var(--ink); padding: 6px 10px; flex: 0 1 220px; min-width: 120px; font: inherit; }
+  .chip { background: var(--panel); border: 2px solid var(--line); padding: 5px 10px; white-space: nowrap; }
+  .chip.on { border-color: var(--ink); background: #262a42; }
+  .toggles { display: flex; gap: 12px; margin-left: auto; }
+  select.chip { font: inherit; color: var(--ink); }
+  .toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--dim); cursor: pointer; user-select: none; }
+
+  /* Attention queue */
+  .queue { display: flex; gap: 10px; align-items: center; padding: 8px 18px; background: #1f1219; border-bottom: 2px solid #4a1f2a; overflow-x: auto; min-height: 46px; flex-shrink: 0; }
+  .queue.empty { background: #10201a; border-color: #1f4a35; color: var(--work); }
+  .queue .label { color: var(--attn); font-size: 9px; white-space: nowrap; }
+  .qitem { background: #2a1520; border: 2px solid var(--attn); padding: 4px 10px; white-space: nowrap; }
+  .qitem small { color: #ff9aa5; margin-left: 6px; }
+
+  main { display: flex; flex: 1; min-height: 0; }
+  .floor { flex: 1; overflow-y: auto; padding: 22px 18px 40px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-flow: row dense; align-content: start; gap: 22px 12px;
+    background: repeating-linear-gradient(0deg, var(--floor) 0 38px, var(--floor-line) 38px 40px); }
+
+  /* Rooms = projects */
+  /* A folder is a box around its desks, spanning one grid column per session. */
+  .room { grid-column: span var(--n); border: 2px dashed #3a4066; background: rgba(14,16,24,.45); position: relative; }
+  .room.hot { border-color: #6a2a38; }
+  .room-head { position: absolute; top: -10px; left: 8px; display: flex; gap: 6px; align-items: center; max-width: calc(100% - 16px); }
+  .room-head .sign { background: #eef0f6; color: #333; padding: 4px 6px; font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .room-head .cnt { background: var(--attn); color: #fff; font-size: 7px; padding: 4px 5px; }
+  .desks { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; padding: 10px 4px 4px; }
+
+  /* Desk card */
+  .desk { position: relative; padding: 4px 4px 0; border: 2px solid transparent; cursor: pointer; transition: transform .1s; }
+  .desk:hover { transform: translateY(-2px); }
+  .desk.sel { border-color: #f3c84b; background: rgba(243,200,75,.06); }
+  .desk.dim { opacity: .25; }
+  .desk svg { width: 100%; height: auto; image-rendering: pixelated; shape-rendering: crispEdges; display: block; }
+  .plate { background: #0b0d15; border: 2px solid var(--line); padding: 6px 8px; margin-top: -4px; }
+  .plate .n { font-size: 9px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .plate .m { color: var(--dim); font-size: 11px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .state-tag { font-size: 7px; padding: 3px 4px; color: #0b0d15; white-space: nowrap; flex-shrink: 0; }
+  .plate .n span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pin { position: absolute; top: 4px; left: 6px; font-size: 14px; }
+  .stale { position: absolute; top: 6px; left: 6px; font-size: 7px; color: #f3c84b; background: #2b2410; padding: 3px 4px; border: 1px solid #f3c84b; }
+
+  /* Status animations */
+  .badge-attn { animation: bounce .6s steps(2) infinite; }
+  .typing rect.ln { animation: type 1.2s steps(3) infinite; }
+  .typing rect.ln:nth-child(2) { animation-delay: .3s; } .typing rect.ln:nth-child(3) { animation-delay: .6s; }
+  .zzz { animation: float 2s steps(4) infinite; }
+  .arm-l { animation: tap .25s steps(2) infinite; } .arm-r { animation: tap .25s steps(2) infinite reverse; }
+  @keyframes bounce { 50% { transform: translateY(-1.5px); } }
+  @keyframes type { 0% { width: 2px; } 100% { width: 8px; } }
+  @keyframes float { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-3px); opacity: .3; } }
+  @keyframes tap { 50% { transform: translateY(-.6px); } }
+
+  /* Side panel */
+  aside { width: 0; overflow: hidden; background: var(--panel); border-left: 2px solid var(--line); transition: width .15s; }
+  aside.open { width: 420px; }
+  .pane { width: 420px; height: 100%; overflow-y: auto; padding: 18px; }
+  .pane h2 { font-size: 11px; margin: 0 0 6px; line-height: 1.6; }
+  .pane .sub { color: var(--dim); margin-bottom: 14px; }
+  .speech { background: #eef0f6; color: #1a1c28; padding: 12px 14px; position: relative; margin: 10px 0 18px; line-height: 1.55; box-shadow: 4px 4px 0 #000; }
+  .speech::before { content: ''; position: absolute; top: -10px; left: 22px; border: 6px solid transparent; border-bottom: 6px solid #eef0f6; border-left-width: 6px; }
+  .speech .who { font-size: 8px; color: #555; margin-bottom: 6px; }
+  .ask { border: 2px solid var(--attn); background: #2a1520; padding: 10px; margin-bottom: 16px; }
+  .ask .pixel { color: var(--attn); font-size: 8px; margin-bottom: 6px; }
+  .sec { font-size: 8px; color: var(--dim); margin: 18px 0 8px; }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
+  .kv span:nth-child(odd) { color: var(--dim); }
+  .meter { height: 10px; background: #0b0d15; border: 2px solid var(--line); }
+  .meter i { display: block; height: 100%; }
+  .todo { display: flex; gap: 8px; padding: 2px 0; }
+  .todo.done { color: var(--dim); text-decoration: line-through; }
+  .tl { border-left: 2px solid var(--line); margin-left: 4px; padding-left: 12px; }
+  .tl div { margin-bottom: 8px; position: relative; }
+  .tl div::before { content: ''; position: absolute; left: -17px; top: 5px; width: 8px; height: 8px; background: var(--dim); }
+  .tl small { color: var(--dim); display: block; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn { background: #262a42; border: 2px solid var(--line); padding: 6px 10px; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--attn); border-color: var(--attn); color: #fff; }
+  .btn.danger { border-color: var(--attn); color: var(--attn); }
+  .btn.danger:hover { background: var(--attn); color: #fff; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 20; }
+  .modal-bg.open { display: flex; }
+  .modal { width: 420px; background: var(--panel); border: 2px solid var(--attn); box-shadow: 6px 6px 0 #000; padding: 18px; line-height: 1.55; }
+  .modal h3 { font-size: 10px; color: var(--attn); margin: 0 0 12px; }
+  .modal code { background: #0b0d15; padding: 1px 4px; }
+  .modal .actions { justify-content: flex-end; margin-top: 16px; }
+  .desk.dying { animation: die .9s steps(6) forwards; pointer-events: none; }
+  @keyframes die { 60% { filter: grayscale(1) brightness(.5); transform: none; } 100% { filter: grayscale(1) brightness(0); transform: scale(.85); opacity: 0; } }
+  textarea { width: 100%; min-height: 60px; background: #0b0d15; color: var(--ink); border: 2px solid var(--line); font: inherit; padding: 8px; }
+  .close { float: right; background: none; border: none; font-size: 18px; color: var(--dim); }
+
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #0b0d15; border: 2px solid var(--ink); padding: 10px 16px; display: none; z-index: 10; }
+  .help { flex-shrink: 0; padding: 6px 18px; background: #0e1018; border-top: 2px solid var(--line); color: var(--dim); font-size: 11px; }
+  kbd { border: 1px solid var(--line); padding: 0 4px; background: #0b0d15; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="pixel">CLAUDE OFFICE</h1>
+  <div class="stats" id="stats"></div>
+  <div class="spacer"></div>
+  <input class="search" id="search" placeholder="/ search sessions…">
+  <div id="filters"></div>
+  <select class="chip" id="sort">
+    <option value="urgency">Sort: urgency</option>
+    <option value="recent">Sort: recent</option>
+    <option value="name">Sort: name</option>
+  </select>
+  <div class="toggles">
+    <label class="toggle"><input type="checkbox" id="live" checked> live demo</label>
+    <label class="toggle"><input type="checkbox" id="sound"> sound</label>
+  </div>
+</header>
+
+<div class="queue" id="queue"></div>
+
+<main>
+  <div class="floor" id="floor"></div>
+  <aside id="aside"><div class="pane" id="pane"></div></aside>
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="modal"><div class="modal" id="modalBody"></div></div>
+<div class="help"><kbd>/</kbd> search · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>a</kbd> next needing attention · <kbd>x</kbd> kill · <kbd>Esc</kbd> close</div>
+
+<script>
+const MIN = 60_000, HOUR = 60 * MIN, now = Date.now();
+const STATES = {
+  attention: { label: 'NEEDS YOU', color: 'var(--attn)', rank: 0 },
+  working:   { label: 'WORKING',   color: 'var(--work)', rank: 1 },
+  idle:      { label: 'IDLE',      color: 'var(--idle)', rank: 2 },
+};
+const STALE_AFTER = 2 * HOUR;
+
+// Mock sessions; the real app would derive these from ~/.claude/projects/*.jsonl + hook events.
+let sessions = [
+  { id: '7dc6194c', name: 'Payment retry fix', role: 'Backend', project: 'lending-mcp-core', branch: 'feature/OBS-103-fix-retry-bug', cwd: 'C:\\Github\\lending-mcp-core', model: 'Opus 5.5',
+    state: 'attention', since: now - 12 * MIN, shirt: '#3fa7ff', hair: '#3b2a1a',
+    brief: "I found the retry bug: PaymentRetryHandler swallows the timeout and never re-queues. I've written a failing test and a fix, but I'm blocked on approval to edit RetryPolicy.cs.",
+    waitingFor: 'Permission to edit src/Payments/RetryPolicy.cs', tokens: 182_400, cost: 3.12, ctx: 64,
+    todos: [['Reproduce timeout swallow', 1], ['Write failing test', 1], ['Patch RetryPolicy', 0], ['Run full test suite', 0]],
+    files: ['PaymentRetryHandler.cs', 'RetryPolicyTests.cs'], timeline: [[40, 'Started session from Jira OBS-103'], [25, 'Reproduced bug in unit test'], [12, 'Asked for edit permission']] },
+  { id: '0b4421b7', name: 'QA regression sweep', role: 'QA', project: 'lending-mcp-core', branch: 'feature/OBS-110-regression', cwd: 'C:\\Github\\lending-mcp-core', model: 'Sonnet 5.5',
+    state: 'working', since: now - 6 * MIN, shirt: '#a35cff', hair: '#1a1a1a',
+    brief: "I'm running the integration suite against the new deal-structuring endpoints. 142 of 210 tests done, 2 flaky so far, and I'm tagging those.",
+    tokens: 96_000, cost: 1.04, ctx: 38,
+    todos: [['Collect failing tests', 1], ['Run integration suite', 0], ['Write regression report', 0]],
+    files: ['DealStructuringTests.cs'], timeline: [[30, 'Pulled latest main'], [6, 'Started integration run']] },
+  { id: 'd29bcf37', name: 'Metadata order cleanup', role: 'Data', project: 'CreditLens', branch: 'feature/CL-882-metadata-order', cwd: 'C:\\Github\\CreditLens', model: 'Opus 5.5',
+    state: 'working', since: now - 3 * MIN, shirt: '#2ad18a', hair: '#6b3e1f',
+    brief: "I'm restoring block positions in metadata.xml after the editor scrambled it. Scan found 14 moved blocks; I'm writing them back now.",
+    tokens: 41_000, cost: 0.58, ctx: 22,
+    todos: [['Scan moved blocks', 1], ['Rewrite positions', 0], ['Verify numstat', 0]],
+    files: ['metadata.xml'], timeline: [[8, 'Ran Fix-MetadataOrder -Scan'], [3, 'Writing positions']] },
+  { id: 'c936162a', name: 'Entity API pagination', role: 'Backend', project: 'lending-mcp-entity', branch: 'feature/ENT-41-pagination', cwd: 'C:\\Github\\lending-mcp-entity', model: 'Sonnet 5.5',
+    state: 'attention', since: now - 34 * MIN, shirt: '#ff7a1a', hair: '#2b1a10',
+    brief: "Pagination is done and tests pass. Before I commit I need the Jira ticket ID, because the branch name doesn't match the commit-message format.",
+    waitingFor: 'Answer: which JIRA ticket ID to use?', tokens: 120_500, cost: 1.88, ctx: 71,
+    todos: [['Add cursor pagination', 1], ['Unit tests', 1], ['Commit', 0], ['Open PR', 0]],
+    files: ['EntityController.cs', 'PagedResult.cs', 'EntityControllerTests.cs'], timeline: [[90, 'Session started'], [50, 'Tests green'], [34, 'Asked for JIRA ID']] },
+  { id: '47c54f20', name: 'Pivot agent prompt tuning', role: 'AI', project: 'pivot-agent', branch: 'main', cwd: 'C:\\Github\\pivot-agent', model: 'Opus 5.5',
+    state: 'idle', since: now - 3.5 * HOUR, shirt: '#2ad18a', hair: '#1a1a1a',
+    brief: "I finished the eval run: the new system prompt cut hallucinated tool calls from 9% to 2%. Nothing is pending. You can close me or give me the next task.",
+    tokens: 210_000, cost: 4.4, ctx: 88,
+    todos: [['Baseline eval', 1], ['Tune prompt', 1], ['Re-run eval', 1]],
+    files: ['prompts/system.md', 'evals/results.json'], timeline: [[260, 'Baseline eval'], [215, 'Final eval complete'], [210, 'Went idle']] },
+  { id: 'eab8433b', name: 'Dashboard dark mode', role: 'Frontend', project: 'pivot-agent', branch: 'feature/PA-12-dark-mode', cwd: 'C:\\Github\\pivot-agent\\web', model: 'Sonnet 5.5',
+    state: 'idle', since: now - 18 * MIN, shirt: '#3fa7ff', hair: '#8a5a2b',
+    brief: "Dark mode is merged into the branch and screenshots are attached. I'm waiting for your next instruction.",
+    tokens: 58_000, cost: 0.71, ctx: 31,
+    todos: [['Theme tokens', 1], ['Toggle UI', 1], ['Screenshots', 1]],
+    files: ['theme.css', 'Toggle.tsx'], timeline: [[60, 'Started'], [18, 'Finished, went idle']] },
+  { id: '01a0ed74', name: 'PR review: deal calc', role: 'Reviewer', project: 'lending-mcp-dealstructuring', branch: 'feature/DS-77-amortization', cwd: 'C:\\Github\\lending-mcp-dealstructuring', model: 'Opus 5.5',
+    state: 'working', since: now - 1 * MIN, shirt: '#ffd23f', hair: '#3b2a1a',
+    brief: "I'm reviewing the amortization PR. I've found one rounding bug in the balloon-payment path and I'm checking the remaining 4 files.",
+    tokens: 77_000, cost: 1.2, ctx: 45,
+    todos: [['Read diff', 1], ['Check calc correctness', 0], ['Post findings', 0]],
+    files: ['Amortization.cs'], timeline: [[15, 'Fetched PR #418'], [1, 'Found rounding bug']] },
+  { id: '2026x0920', name: 'Nightly pipeline', role: 'Pipeline', project: 'lending-mcp-dealstructuring', branch: 'main', cwd: 'C:\\Github\\lending-mcp-dealstructuring', model: 'Haiku 4.5',
+    state: 'attention', since: now - 4 * MIN, shirt: '#ff4d5e', hair: '#1a1a1a',
+    brief: "The nightly build failed at the docker step: lending-mcp-core can't reach the database container. Should I restart the containers?",
+    waitingFor: 'Confirm: restart dev containers?', tokens: 12_000, cost: 0.05, ctx: 9,
+    todos: [['Build', 1], ['Docker compose up', 0], ['Smoke test', 0]],
+    files: ['docker-compose.yml'], timeline: [[10, 'Pipeline kicked off'], [4, 'Docker step failed']] },
+];
+sessions.forEach(s => s.timeline = s.timeline.map(([m, msg]) => ({ t: now - m * MIN, msg })));
+
+const ui = { filter: 'all', q: '', sort: 'urgency', sel: null, pinned: new Set(JSON.parse(localStorage.getItem('pins') || '[]')) };
+const $ = id => document.getElementById(id);
+
+function ago(t) {
+  const d = Date.now() - t;
+  if (d < MIN) return 'just now';
+  if (d < HOUR) return Math.floor(d / MIN) + 'm';
+  return Math.floor(d / HOUR) + 'h ' + Math.floor((d % HOUR) / MIN) + 'm';
+}
+const isStale = s => s.state === 'idle' && Date.now() - s.since > STALE_AFTER;
+
+function sprite(s) {
+  const skin = '#f2c79b', st = s.state;
+  const screen = st === 'working' ? '#2ad18a' : st === 'attention' ? '#3a1f2a' : '#4a4f6a';
+  const arms = st === 'attention'
+    ? `<rect x="4" y="5" width="2" height="8" fill="${s.shirt}"/><rect x="4" y="4" width="2" height="2" fill="${skin}"/>
+       <rect x="16" y="5" width="2" height="8" fill="${s.shirt}"/><rect x="16" y="4" width="2" height="2" fill="${skin}"/>`
+    : st === 'working'
+    ? `<g class="arm-l"><rect x="4" y="13" width="2" height="5" fill="${s.shirt}"/><rect x="5" y="18" width="3" height="1" fill="${skin}"/></g>
+       <g class="arm-r"><rect x="16" y="13" width="2" height="5" fill="${s.shirt}"/><rect x="14" y="18" width="3" height="1" fill="${skin}"/></g>`
+    : `<rect x="4" y="13" width="2" height="6" fill="${s.shirt}"/><rect x="16" y="13" width="2" height="6" fill="${s.shirt}"/>`;
+  const eyes = st === 'idle'
+    ? `<rect x="8" y="8" width="2" height="1" fill="#222"/><rect x="12" y="8" width="2" height="1" fill="#222"/>`
+    : `<rect x="8" y="7" width="1" height="2" fill="#222"/><rect x="13" y="7" width="1" height="2" fill="#222"/>`;
+  const badge = st === 'attention'
+    ? `<g class="badge-attn"><rect x="23" y="1" width="7" height="7" fill="#ff4d5e"/><rect x="26" y="2" width="1" height="3" fill="#fff"/><rect x="26" y="6" width="1" height="1" fill="#fff"/></g>`
+    : st === 'idle'
+    ? `<text class="zzz" x="25" y="6" font-size="5" font-family="monospace" font-weight="bold" fill="#c9cde0">Z</text>` : '';
+  const lines = st === 'working'
+    ? `<g class="typing"><rect class="ln" x="21" y="11" width="6" height="1" fill="#0b3b25"/><rect class="ln" x="21" y="13" width="6" height="1" fill="#0b3b25"/><rect class="ln" x="21" y="15" width="6" height="1" fill="#0b3b25"/></g>` : '';
+  return `<svg viewBox="0 0 32 30" xmlns="http://www.w3.org/2000/svg">
+    <rect x="19" y="9" width="11" height="9" fill="#2a2e44"/><rect x="20" y="10" width="9" height="7" fill="${screen}"/>${lines}
+    <rect x="24" y="18" width="1" height="2" fill="#2a2e44"/>
+    <rect x="7" y="2" width="8" height="2" fill="${s.hair}"/><rect x="6" y="3" width="1" height="3" fill="${s.hair}"/><rect x="15" y="3" width="1" height="3" fill="${s.hair}"/>
+    <rect x="7" y="4" width="8" height="7" fill="${skin}"/>${eyes}<rect x="10" y="10" width="2" height="1" fill="#c48a6a"/>
+    <rect x="6" y="11" width="10" height="9" fill="${s.shirt}"/>${arms}
+    <rect x="1" y="20" width="30" height="4" fill="var(--wood)"/><rect x="1" y="24" width="30" height="1" fill="var(--wood-dark)"/>
+    <rect x="3" y="25" width="2" height="5" fill="var(--wood-dark)"/><rect x="27" y="25" width="2" height="5" fill="var(--wood-dark)"/>
+    <rect x="3" y="18" width="3" height="2" fill="#e05050"/>
+    ${badge}</svg>`;
+}
+
+function visible() {
+  const q = ui.q.toLowerCase();
+  return sessions.filter(s =>
+    (ui.filter === 'all' || s.state === ui.filter || (ui.filter === 'stale' && isStale(s))) &&
+    (!q || [s.name, s.role, s.project, s.branch, s.id, s.brief].join(' ').toLowerCase().includes(q)));
+}
+function sorted(list) {
+  const by = {
+    urgency: (a, b) => (ui.pinned.has(b.id) - ui.pinned.has(a.id)) || STATES[a.state].rank - STATES[b.state].rank || a.since - b.since,
+    recent: (a, b) => b.since - a.since,
+    name: (a, b) => a.name.localeCompare(b.name),
+  };
+  return [...list].sort(by[ui.sort]);
+}
+
+function renderHeader() {
+  const c = { working: 0, idle: 0, attention: 0 };
+  sessions.forEach(s => c[s.state]++);
+  const stale = sessions.filter(isStale).length;
+  const cost = sessions.reduce((a, s) => a + s.cost, 0);
+  $('stats').innerHTML =
+    `<span><i class="dot" style="background:var(--work)"></i><b>${c.working}</b> working</span>
+     <span><i class="dot" style="background:var(--attn)"></i><b>${c.attention}</b> need you</span>
+     <span><i class="dot" style="background:var(--idle)"></i><b>${c.idle}</b> idle</span>
+     <span>💰 <b>$${cost.toFixed(2)}</b> today</span>`;
+  const f = [['all', 'All'], ['attention', 'Needs you'], ['working', 'Working'], ['idle', 'Idle'], ['stale', `Stale (${stale})`]];
+  $('filters').innerHTML = f.map(([k, l]) => `<button class="chip ${ui.filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join(' ');
+  document.title = c.attention ? `(${c.attention}) Claude Office` : 'Claude Office';
+}
+
+function renderQueue() {
+  const q = sessions.filter(s => s.state === 'attention').sort((a, b) => a.since - b.since);
+  const el = $('queue');
+  el.className = 'queue' + (q.length ? '' : ' empty');
+  el.innerHTML = q.length
+    ? `<span class="label pixel">INBOX ▸</span>` + q.map(s =>
+        `<button class="qitem" data-id="${s.id}">${s.name}<small>${s.waitingFor ? s.waitingFor.split(':')[0] : 'needs you'} · ${ago(s.since)}</small></button>`).join('')
+    : `<span class="pixel" style="font-size:9px">✓ NOBODY IS WAITING ON YOU</span>`;
+}
+
+function renderFloor() {
+  const vis = new Set(visible().map(s => s.id));
+  const rooms = {};
+  sorted(sessions).forEach(s => (rooms[s.project] ||= []).push(s));
+  // Inside a folder, most recently interacted first; the sort dropdown only orders the folders.
+  const lastActive = s => Math.max(s.since, ...s.timeline.map(e => e.t));
+  Object.values(rooms).forEach(l => l.sort((a, b) => lastActive(b) - lastActive(a)));
+  const roomOrder = Object.keys(rooms).sort((a, b) =>
+    Math.min(...rooms[a].map(s => STATES[s.state].rank)) - Math.min(...rooms[b].map(s => STATES[s.state].rank)));
+  $('floor').innerHTML = roomOrder.map(p => {
+    const list = rooms[p], shown = list.filter(s => vis.has(s.id));
+    if (!shown.length) return '';
+    const counts = list.reduce((a, s) => (a[s.state] = (a[s.state] || 0) + 1, a), {});
+    const n = Math.min(list.length, 6);
+    return `<section class="room ${counts.attention ? 'hot' : ''}" style="--n:${n}" title="${list[0].cwd}">
+      <div class="room-head"><div class="sign pixel">${p}</div>${counts.attention ? `<span class="cnt pixel">${counts.attention}!</span>` : ''}</div>
+      <div class="desks">${list.map(desk).join('')}</div></section>`;
+  }).join('') || `<p class="pixel" style="color:var(--dim);font-size:10px;padding:40px">No sessions match.</p>`;
+
+  function desk(s) {
+    const st = STATES[s.state];
+    return `<div class="desk ${ui.sel === s.id ? 'sel' : ''} ${vis.has(s.id) ? '' : 'dim'}" data-id="${s.id}">
+      ${ui.pinned.has(s.id) ? '<span class="pin">📌</span>' : ''}${isStale(s) ? '<span class="stale pixel">STALE</span>' : ''}
+      ${sprite(s)}
+      <div class="plate"><div class="n pixel"><span>${s.role}</span><span class="state-tag" style="background:${st.color}">${st.label}</span></div>
+        <div class="m">${s.name}</div><div class="m">${s.model} · ${s.id} · ${ago(s.since)}</div></div></div>`;
+  }
+}
+
+function renderPanel() {
+  const s = sessions.find(x => x.id === ui.sel);
+  $('aside').classList.toggle('open', !!s);
+  if (!s) return;
+  const st = STATES[s.state];
+  const ctxColor = s.ctx > 80 ? 'var(--attn)' : s.ctx > 60 ? '#f3c84b' : 'var(--work)';
+  const done = s.todos.filter(t => t[1]).length;
+  const note = localStorage.getItem('note:' + s.id) || '';
+  $('pane').innerHTML = `
+    <button class="close" data-act="close">✕</button>
+    <h2 class="pixel">${s.name}</h2>
+    <div class="sub"><span class="state-tag pixel" style="background:${st.color}">${st.label}</span> for ${ago(s.since)} · ${s.role} · ${s.model}</div>
+    <div class="speech"><div class="who pixel">${s.role.toUpperCase()} SAYS:</div>${s.brief}</div>
+    ${s.state === 'attention' ? `<div class="ask"><div class="pixel">WAITING ON YOU</div>${s.waitingFor}
+      <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="jump">Jump to terminal</button><button class="btn" data-act="resolve">Mark handled</button></div></div>` : ''}
+    ${isStale(s) ? `<div class="ask" style="border-color:#f3c84b;background:#2b2410"><div class="pixel" style="color:#f3c84b">STALE</div>Idle for ${ago(s.since)}. Close it to free context, or give it a new task.</div>` : ''}
+    <div class="sec pixel">PROGRESS ${done}/${s.todos.length}</div>
+    ${s.todos.map(([t, d]) => `<div class="todo ${d ? 'done' : ''}">${d ? '■' : '□'} ${t}</div>`).join('')}
+    <div class="sec pixel">CONTEXT WINDOW</div>
+    <div class="meter"><i style="width:${s.ctx}%;background:${ctxColor}"></i></div>
+    <div style="color:var(--dim);margin-top:4px">${s.ctx}% used${s.ctx > 80 ? ' · consider /compact' : ''} · ${(s.tokens / 1000).toFixed(1)}k tokens · $${s.cost.toFixed(2)}</div>
+    <div class="sec pixel">WHERE</div>
+    <div class="kv"><span>project</span><span>${s.project}</span><span>branch</span><span>${s.branch}</span>
+      <span>folder</span><span>${s.cwd}</span><span>session</span><span>${s.id}</span><span>files</span><span>${s.files.join(', ')}</span></div>
+    <div class="sec pixel">ACTIVITY</div>
+    <div class="tl">${[...s.timeline].reverse().map(e => `<div>${e.msg}<small>${ago(e.t)} ago</small></div>`).join('')}</div>
+    <div class="sec pixel">MY NOTES</div>
+    <textarea id="note" placeholder="Private note for this session…">${note}</textarea>
+    <div class="sec pixel">ACTIONS</div>
+    <div class="actions">
+      <button class="btn" data-act="resume">Copy resume cmd</button>
+      <button class="btn" data-act="pin">${ui.pinned.has(s.id) ? 'Unpin' : 'Pin to top'}</button>
+      <button class="btn" data-act="folder">Open folder</button>
+      <button class="btn" data-act="archive">Archive</button>
+      <button class="btn danger" data-act="kill">Kill session</button>
+    </div>`;
+  $('note').oninput = e => localStorage.setItem('note:' + s.id, e.target.value);
+}
+
+function render() { renderHeader(); renderQueue(); renderFloor(); renderPanel(); }
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 2500);
+}
+function beep() {
+  if (!$('sound').checked) return;
+  const a = new AudioContext(), o = a.createOscillator(), g = a.createGain();
+  o.type = 'square'; o.frequency.value = 880; g.gain.value = .05;
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + .12);
+}
+// Ending the process is irreversible for in-flight work, so always confirm; the transcript survives for --resume.
+function openKill(s) {
+  const risk = s.state === 'working' ? `<p><b style="color:var(--attn)">It is mid-task.</b> Whatever it is doing right now stops immediately.</p>`
+    : s.state === 'attention' ? `<p>It is waiting on you: <i>${s.waitingFor}</i>. That request will be dropped.</p>` : '';
+  $('modalBody').innerHTML = `<h3 class="pixel">KILL SESSION?</h3>
+    <p>This closes the Claude process for <b>${s.name}</b> (${s.id}) in <code>${s.cwd}</code>.</p>${risk}
+    <p style="color:var(--dim)">The transcript is kept. You can bring it back with <code>claude --resume ${s.id}</code>.</p>
+    <div class="actions"><button class="btn" data-act="kill-cancel">Cancel</button><button class="btn primary" data-act="kill-confirm">Kill it</button></div>`;
+  $('modal').classList.add('open');
+  $('modalBody').querySelector('[data-act="kill-confirm"]').focus();
+}
+function closeModal() { $('modal').classList.remove('open'); }
+function select(id) { ui.sel = id; history.replaceState(null, '', id ? '#' + id : location.pathname); render(); }
+function setState(s, state, msg) {
+  s.state = state; s.since = Date.now(); s.timeline.push({ t: s.since, msg });
+  if (state === 'attention') { s.waitingFor ||= 'Approve a tool call'; beep(); toast(`🔴 ${s.role} needs you: ${s.name}`); }
+  render();
+}
+
+document.addEventListener('click', e => {
+  if (e.target.id === 'modal') return closeModal();
+  const f = e.target.closest('[data-f]'); if (f) { ui.filter = f.dataset.f; return render(); }
+  const d = e.target.closest('[data-id]'); if (d) return select(d.dataset.id);
+  const a = e.target.closest('[data-act]'); if (!a) return;
+  const s = sessions.find(x => x.id === ui.sel);
+  ({
+    close: () => select(null),
+    resume: () => { navigator.clipboard?.writeText(`cd "${s.cwd}" && claude --resume ${s.id}`); toast('Copied: claude --resume ' + s.id); },
+    pin: () => { ui.pinned.has(s.id) ? ui.pinned.delete(s.id) : ui.pinned.add(s.id); localStorage.setItem('pins', JSON.stringify([...ui.pinned])); render(); },
+    jump: () => toast('Real app: focuses the terminal window running ' + s.id),
+    folder: () => toast('Real app: opens ' + s.cwd),
+    resolve: () => { s.waitingFor = null; setState(s, 'working', 'You handled the request'); },
+    kill: () => openKill(s),
+    'kill-cancel': closeModal,
+    'kill-confirm': () => {
+      closeModal();
+      document.querySelector(`.desk[data-id="${s.id}"]`)?.classList.add('dying');
+      setTimeout(() => { sessions = sessions.filter(x => x !== s); select(null); toast(`💀 Killed ${s.name} — resume anytime with claude --resume ${s.id}`); }, 900);
+    },
+    archive: () => { sessions = sessions.filter(x => x !== s); ui.sel = null; toast('Archived ' + s.name); render(); },
+  })[a.dataset.act]();
+});
+$('search').oninput = e => { ui.q = e.target.value; render(); };
+$('sort').onchange = e => { ui.sort = e.target.value; render(); };
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select')) { if (e.key === 'Escape') e.target.blur(); return; }
+  if ($('modal').classList.contains('open')) { if (e.key === 'Escape') closeModal(); return; }
+  const list = sorted(visible()), i = list.findIndex(s => s.id === ui.sel);
+  if (e.key === '/') { e.preventDefault(); $('search').focus(); }
+  else if (e.key === 'Escape') select(null);
+  else if (e.key === 'j') select(list[Math.min(i + 1, list.length - 1)]?.id);
+  else if (e.key === 'k') select(list[Math.max(i - 1, 0)]?.id);
+  else if (e.key === 'x' && ui.sel) openKill(sessions.find(s => s.id === ui.sel));
+  else if (e.key === 'a') { const n = sessions.filter(s => s.state === 'attention').sort((a, b) => a.since - b.since)[0]; n ? select(n.id) : toast('Nobody needs you 🎉'); }
+});
+
+// Live demo: random state changes so the floor feels alive.
+const DEMO = {
+  working: [['attention', 'Asked for permission to run a command'], ['idle', 'Finished the task']],
+  idle: [['working', 'Received a new prompt']],
+  attention: [],
+};
+setInterval(() => {
+  if (!$('live').checked) return;
+  const s = sessions[Math.floor(Math.random() * sessions.length)], opts = DEMO[s.state];
+  if (opts.length) setState(s, ...opts[Math.floor(Math.random() * opts.length)]);
+}, 7000);
+setInterval(render, 30_000);
+ui.sel = sessions.some(s => s.id === location.hash.slice(1)) ? location.hash.slice(1) : null;
+render();
+</script>
+</body>
+</html>

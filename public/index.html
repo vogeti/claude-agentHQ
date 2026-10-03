@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent HQ</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12141f; --floor: #1b1e2e; --floor-line: #232741; --panel: #171a29;
+    --ink: #e6e8f2; --dim: #8a90ad; --line: #2c3150;
+    --work: #3ee08f; --idle: #8a90ad; --attn: #ff4d5e; --done: #5aa9ff;
+    --wood: #b87842; --wood-dark: #8a5530;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 13px; overflow: hidden;
+    display: flex; flex-direction: column; height: 100vh; }
+  .pixel { font-family: 'Press Start 2P', monospace; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* Top bar */
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-shrink: 0; padding: 10px 18px; border-bottom: 2px solid var(--line); background: #0e1018; }
+  header h1 { font-size: 12px; margin: 0; letter-spacing: 1px; white-space: nowrap; }
+  #filters { display: flex; gap: 6px; }
+  .stats { display: flex; gap: 14px; color: var(--dim); white-space: nowrap; }
+  .stats b { color: var(--ink); }
+  .dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; }
+  .spacer { flex: 1; }
+  .search { background: var(--panel); border: 2px solid var(--line); color: var(--ink); padding: 6px 10px; flex: 0 1 220px; min-width: 120px; font: inherit; }
+  .chip { background: var(--panel); border: 2px solid var(--line); padding: 5px 10px; white-space: nowrap; }
+  .chip.on { border-color: var(--ink); background: #262a42; }
+  .toggles { display: flex; gap: 12px; margin-left: auto; }
+  select.chip { font: inherit; color: var(--ink); }
+  .toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--dim); cursor: pointer; user-select: none; }
+
+  /* Attention queue */
+  .queue { display: flex; gap: 10px; align-items: center; padding: 8px 18px; background: #1f1219; border-bottom: 2px solid #4a1f2a; overflow-x: auto; min-height: 46px; flex-shrink: 0; }
+  .queue.empty { background: #10201a; border-color: #1f4a35; color: var(--work); }
+  .queue .label { color: var(--attn); font-size: 9px; white-space: nowrap; }
+  .qitem { background: #2a1520; border: 2px solid var(--attn); padding: 4px 10px; white-space: nowrap; }
+  .qitem small { color: #ff9aa5; margin-left: 6px; }
+
+  main { display: flex; flex: 1; min-height: 0; }
+  .floor { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 18px 40px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-flow: row dense; align-content: start; gap: 22px 12px;
+    background: repeating-linear-gradient(0deg, var(--floor) 0 38px, var(--floor-line) 38px 40px); }
+
+  /* Rooms = projects */
+  /* A folder is a box around its desks, spanning one grid column per session. */
+  .room { grid-column: span var(--n); border: 2px dashed #3a4066; background: rgba(14,16,24,.45); position: relative; }
+  .room.hot { border-color: #6a2a38; }
+  .room-head { position: absolute; top: -10px; left: 8px; display: flex; gap: 6px; align-items: center; max-width: calc(100% - 16px); }
+  .room-head .sign { background: #eef0f6; color: #333; padding: 4px 6px; font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .room-head .cnt { background: var(--attn); color: #fff; font-size: 7px; padding: 4px 5px; }
+  .desks { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; padding: 10px 4px 4px; }
+
+  /* Desk card */
+  .desk { position: relative; padding: 4px 4px 0; border: 2px solid transparent; cursor: pointer; transition: transform .1s; }
+  .desk:hover { transform: translateY(-2px); }
+  .desk.sel { border-color: #f3c84b; background: rgba(243,200,75,.06); }
+  .desk.dim { opacity: .25; }
+  .desk svg { width: 100%; height: auto; image-rendering: pixelated; shape-rendering: crispEdges; display: block; }
+  .plate { background: #0b0d15; border: 2px solid var(--line); padding: 6px 8px; margin-top: -4px; }
+  .plate .n { font-size: 9px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .plate .m { color: var(--dim); font-size: 11px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .state-tag { font-size: 7px; padding: 3px 4px; color: #0b0d15; white-space: nowrap; flex-shrink: 0; }
+  .plate .n span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pin { position: absolute; top: 4px; left: 6px; font-size: 14px; }
+  .stale { position: absolute; top: 6px; left: 6px; font-size: 7px; color: #f3c84b; background: #2b2410; padding: 3px 4px; border: 1px solid #f3c84b; }
+
+  /* Status animations */
+  .badge-attn { animation: bounce .6s steps(2) infinite; }
+  .typing rect.ln { animation: type 1.2s steps(3) infinite; }
+  .typing rect.ln:nth-child(2) { animation-delay: .3s; } .typing rect.ln:nth-child(3) { animation-delay: .6s; }
+  .zzz { animation: float 2s steps(4) infinite; }
+  .arm-l { animation: tap .25s steps(2) infinite; } .arm-r { animation: tap .25s steps(2) infinite reverse; }
+  @keyframes bounce { 50% { transform: translateY(-1.5px); } }
+  @keyframes type { 0% { width: 2px; } 100% { width: 8px; } }
+  @keyframes float { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-3px); opacity: .3; } }
+  @keyframes tap { 50% { transform: translateY(-.6px); } }
+
+  /* Side panel */
+  aside { width: 0; flex-shrink: 0; overflow: hidden; background: var(--panel); border-left: 2px solid var(--line); }
+  aside.open { width: 420px; }
+  .pane { width: 420px; height: 100%; overflow-y: auto; padding: 18px; }
+  .pane h2 { font-size: 11px; margin: 0 0 6px; line-height: 1.6; }
+  .pane .sub { color: var(--dim); margin-bottom: 14px; }
+  .speech { background: #eef0f6; color: #1a1c28; padding: 12px 14px; position: relative; margin: 10px 0 18px; line-height: 1.55; box-shadow: 4px 4px 0 #000; }
+  .speech::before { content: ''; position: absolute; top: -10px; left: 22px; border: 6px solid transparent; border-bottom: 6px solid #eef0f6; border-left-width: 6px; }
+  .speech .who { font-size: 8px; color: #555; margin-bottom: 6px; }
+  .ask { border: 2px solid var(--attn); background: #2a1520; padding: 10px; margin-bottom: 16px; }
+  .ask .pixel { color: var(--attn); font-size: 8px; margin-bottom: 6px; }
+  .sec { font-size: 8px; color: var(--dim); margin: 18px 0 8px; }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
+  .kv span:nth-child(odd) { color: var(--dim); }
+  .meter { height: 10px; background: #0b0d15; border: 2px solid var(--line); }
+  .meter i { display: block; height: 100%; }
+  .todo { display: flex; gap: 8px; padding: 2px 0; }
+  .todo.done { color: var(--dim); text-decoration: line-through; }
+  .tl { border-left: 2px solid var(--line); margin-left: 4px; padding-left: 12px; }
+  .tl div { margin-bottom: 8px; position: relative; }
+  .tl div::before { content: ''; position: absolute; left: -17px; top: 5px; width: 8px; height: 8px; background: var(--dim); }
+  .tl small { color: var(--dim); display: block; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn { background: #262a42; border: 2px solid var(--line); padding: 6px 10px; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--attn); border-color: var(--attn); color: #fff; }
+  .btn.danger { border-color: var(--attn); color: var(--attn); }
+  .btn.danger:hover { background: var(--attn); color: #fff; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 20; }
+  .modal-bg.open { display: flex; }
+  .modal { width: 420px; background: var(--panel); border: 2px solid var(--attn); box-shadow: 6px 6px 0 #000; padding: 18px; line-height: 1.55; }
+  .modal h3 { font-size: 10px; color: var(--attn); margin: 0 0 12px; }
+  .modal code { background: #0b0d15; padding: 1px 4px; }
+  .modal .actions { justify-content: flex-end; margin-top: 16px; }
+  .desk.dying { animation: die .9s steps(6) forwards; pointer-events: none; }
+  @keyframes die { 60% { filter: grayscale(1) brightness(.5); transform: none; } 100% { filter: grayscale(1) brightness(0); transform: scale(.85); opacity: 0; } }
+  textarea { width: 100%; min-height: 60px; background: #0b0d15; color: var(--ink); border: 2px solid var(--line); font: inherit; padding: 8px; }
+  .close { float: right; background: none; border: none; font-size: 18px; color: var(--dim); }
+
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #0b0d15; border: 2px solid var(--ink); padding: 10px 16px; display: none; z-index: 10; }
+  .help { flex-shrink: 0; padding: 6px 18px; background: #0e1018; border-top: 2px solid var(--line); color: var(--dim); font-size: 11px; }
+  kbd { border: 1px solid var(--line); padding: 0 4px; background: #0b0d15; }
+  .conn { white-space: nowrap; font-size: 11px; }
+  .conn.up { color: var(--work); } .conn.down { color: var(--attn); }
+  .speech .quote { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #b8bccf; color: #3a3d4f; white-space: pre-wrap; font-size: 12px; max-height: 220px; overflow-y: auto; }
+  .ask code { display: block; background: #0b0d15; padding: 6px 8px; margin-top: 8px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; }
+  .ask .hint { color: #ff9aa5; margin-top: 8px; font-size: 12px; }
+  .prompt { background: #0b0d15; border-left: 3px solid var(--done); padding: 8px 10px; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
+  .todo.active { color: var(--work); }
+  .no-sessions { grid-column: 1 / -1; text-align: center; color: var(--dim); padding: 80px 20px; line-height: 2.2; }
+  .no-sessions .pixel { font-size: 11px; color: var(--ink); }
+  .kv span { overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="pixel">AGENT HQ</h1>
+  <div class="stats" id="stats"></div>
+  <div class="spacer"></div>
+  <input class="search" id="search" placeholder="/ search sessions…">
+  <div id="filters"></div>
+  <select class="chip" id="sort">
+    <option value="urgency">Sort: urgency</option>
+    <option value="recent">Sort: recent</option>
+    <option value="name">Sort: name</option>
+  </select>
+  <div class="toggles">
+    <span class="conn" id="conn"></span>
+    <label class="toggle"><input type="checkbox" id="sound"> sound</label>
+  </div>
+</header>
+
+<div class="queue" id="queue"></div>
+
+<main>
+  <div class="floor" id="floor"></div>
+  <aside id="aside"><div class="pane" id="pane"></div></aside>
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="modal"><div class="modal" id="modalBody"></div></div>
+<div class="help"><kbd>/</kbd> search · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> next needing attention · <kbd>x</kbd> kill · <kbd>Esc</kbd> close</div>
+
+<script>
+const MIN = 60_000, HOUR = 60 * MIN;
+const STALE_AFTER = 2 * HOUR;
+const STATES = {
+  attention: { label: 'NEEDS YOU', color: 'var(--attn)', rank: 0 },
+  working:   { label: 'WORKING',   color: 'var(--work)', rank: 1 },
+  idle:      { label: 'IDLE',      color: 'var(--idle)', rank: 2 },
+};
+const SHIRTS = ['#3fa7ff', '#a35cff', '#2ad18a', '#ff7a1a', '#ffd23f', '#ff4d5e', '#4dd8e0', '#ff8ad8'];
+const HAIR = ['#3b2a1a', '#1a1a1a', '#6b3e1f', '#8a5a2b', '#2b1a10'];
+
+let sessions = [];
+const ui = { filter: 'all', q: '', sort: 'urgency', sel: null, loaded: false, connected: false, killTarget: null,
+  pinned: new Set(JSON.parse(localStorage.getItem('pins') || '[]')) };
+const $ = id => document.getElementById(id);
+
+// Everything shown comes from transcripts (prompts, commands, code), so it must be escaped.
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
+const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n || 0);
+const shortModel = m => m ? m.replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2') : 'claude';
+const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const label = s => s.title || clip(s.lastPrompt, 60) || s.name;
+
+function ago(t) {
+  const d = Date.now() - t;
+  if (!t || d < MIN) return 'just now';
+  if (d < HOUR) return Math.floor(d / MIN) + 'm';
+  if (d < 48 * HOUR) return Math.floor(d / HOUR) + 'h ' + Math.floor((d % HOUR) / MIN) + 'm';
+  return Math.floor(d / (24 * HOUR)) + 'd';
+}
+const isStale = s => s.state === 'idle' && Date.now() - s.since > STALE_AFTER;
+
+function sprite(s) {
+  const h = hash(s.id), shirt = SHIRTS[h % SHIRTS.length], hair = HAIR[(h >> 4) % HAIR.length];
+  const skin = '#f2c79b', st = s.state;
+  const screen = st === 'working' ? '#2ad18a' : st === 'attention' ? '#3a1f2a' : '#4a4f6a';
+  const arms = st === 'attention'
+    ? `<rect x="4" y="5" width="2" height="8" fill="${shirt}"/><rect x="4" y="4" width="2" height="2" fill="${skin}"/>
+       <rect x="16" y="5" width="2" height="8" fill="${shirt}"/><rect x="16" y="4" width="2" height="2" fill="${skin}"/>`
+    : st === 'working'
+    ? `<g class="arm-l"><rect x="4" y="13" width="2" height="5" fill="${shirt}"/><rect x="5" y="18" width="3" height="1" fill="${skin}"/></g>
+       <g class="arm-r"><rect x="16" y="13" width="2" height="5" fill="${shirt}"/><rect x="14" y="18" width="3" height="1" fill="${skin}"/></g>`
+    : `<rect x="4" y="13" width="2" height="6" fill="${shirt}"/><rect x="16" y="13" width="2" height="6" fill="${shirt}"/>`;
+  const eyes = st === 'idle'
+    ? `<rect x="8" y="8" width="2" height="1" fill="#222"/><rect x="12" y="8" width="2" height="1" fill="#222"/>`
+    : `<rect x="8" y="7" width="1" height="2" fill="#222"/><rect x="13" y="7" width="1" height="2" fill="#222"/>`;
+  const badge = st === 'attention'
+    ? `<g class="badge-attn"><rect x="23" y="1" width="7" height="7" fill="#ff4d5e"/><rect x="26" y="2" width="1" height="3" fill="#fff"/><rect x="26" y="6" width="1" height="1" fill="#fff"/></g>`
+    : st === 'idle' ? `<text class="zzz" x="25" y="6" font-size="5" font-family="monospace" font-weight="bold" fill="#c9cde0">Z</text>` : '';
+  const lines = st === 'working'
+    ? `<g class="typing"><rect class="ln" x="21" y="11" width="6" height="1" fill="#0b3b25"/><rect class="ln" x="21" y="13" width="6" height="1" fill="#0b3b25"/><rect class="ln" x="21" y="15" width="6" height="1" fill="#0b3b25"/></g>` : '';
+  return `<svg viewBox="0 0 32 30" xmlns="http://www.w3.org/2000/svg">
+    <rect x="19" y="9" width="11" height="9" fill="#2a2e44"/><rect x="20" y="10" width="9" height="7" fill="${screen}"/>${lines}
+    <rect x="24" y="18" width="1" height="2" fill="#2a2e44"/>
+    <rect x="7" y="2" width="8" height="2" fill="${hair}"/><rect x="6" y="3" width="1" height="3" fill="${hair}"/><rect x="15" y="3" width="1" height="3" fill="${hair}"/>
+    <rect x="7" y="4" width="8" height="7" fill="${skin}"/>${eyes}<rect x="10" y="10" width="2" height="1" fill="#c48a6a"/>
+    <rect x="6" y="11" width="10" height="9" fill="${shirt}"/>${arms}
+    <rect x="1" y="20" width="30" height="4" fill="var(--wood)"/><rect x="1" y="24" width="30" height="1" fill="var(--wood-dark)"/>
+    <rect x="3" y="25" width="2" height="5" fill="var(--wood-dark)"/><rect x="27" y="25" width="2" height="5" fill="var(--wood-dark)"/>
+    <rect x="3" y="18" width="3" height="2" fill="#e05050"/>
+    ${badge}</svg>`;
+}
+
+function visible() {
+  const q = ui.q.toLowerCase();
+  return sessions.filter(s =>
+    (ui.filter === 'all' || s.state === ui.filter || (ui.filter === 'stale' && isStale(s))) &&
+    (!q || [s.name, s.title, s.project, s.branch, s.id, s.lastPrompt, s.cwd].join(' ').toLowerCase().includes(q)));
+}
+function sorted(list) {
+  const by = {
+    urgency: (a, b) => (ui.pinned.has(b.id) - ui.pinned.has(a.id)) || STATES[a.state].rank - STATES[b.state].rank || a.since - b.since,
+    recent: (a, b) => b.lastActivity - a.lastActivity,
+    name: (a, b) => label(a).localeCompare(label(b)),
+  };
+  return [...list].sort(by[ui.sort]);
+}
+
+function renderHeader() {
+  const c = { working: 0, idle: 0, attention: 0 };
+  sessions.forEach(s => c[s.state]++);
+  const out = sessions.reduce((a, s) => a + (s.tokens?.output || 0), 0);
+  $('stats').innerHTML =
+    `<span><i class="dot" style="background:var(--work)"></i><b>${c.working}</b> working</span>
+     <span><i class="dot" style="background:var(--attn)"></i><b>${c.attention}</b> need you</span>
+     <span><i class="dot" style="background:var(--idle)"></i><b>${c.idle}</b> idle</span>
+     <span title="Output tokens across open sessions"><b>${fmtK(out)}</b> tokens out</span>`;
+  const stale = sessions.filter(isStale).length;
+  const f = [['all', 'All'], ['attention', 'Needs you'], ['working', 'Working'], ['idle', 'Idle'], ['stale', `Stale (${stale})`]];
+  $('filters').innerHTML = f.map(([k, l]) => `<button class="chip ${ui.filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join(' ');
+  $('conn').className = 'conn ' + (ui.connected ? 'up' : 'down');
+  $('conn').textContent = ui.connected ? '● live' : '○ reconnecting…';
+  document.title = c.attention ? `(${c.attention}) Agent HQ` : 'Agent HQ';
+}
+
+function renderQueue() {
+  const q = sessions.filter(s => s.state === 'attention').sort((a, b) => a.since - b.since);
+  const el = $('queue');
+  el.className = 'queue' + (q.length ? '' : ' empty');
+  el.innerHTML = q.length
+    ? `<span class="label pixel">INBOX ▸</span>` + q.map(s =>
+        `<button class="qitem" data-id="${s.id}">${esc(clip(label(s), 40))}<small>${esc(s.waitingFor)} · ${ago(s.since)}</small></button>`).join('')
+    : `<span class="pixel" style="font-size:9px">✓ NOBODY IS WAITING ON YOU</span>`;
+}
+
+function renderFloor() {
+  if (ui.loaded && !sessions.length) {
+    $('floor').innerHTML = `<div class="no-sessions"><div class="pixel">THE OFFICE IS EMPTY</div>
+      No Claude sessions are running. Start <code>claude</code> in any terminal and it will appear here automatically.</div>`;
+    return;
+  }
+  const vis = new Set(visible().map(s => s.id));
+  const rooms = {};
+  sorted(sessions).forEach(s => (rooms[s.cwd.toLowerCase()] ||= []).push(s)); // Windows paths are case-insensitive
+  // Inside a folder, most recently interacted first; the sort dropdown only orders the folders.
+  Object.values(rooms).forEach(l => l.sort((a, b) => b.lastActivity - a.lastActivity));
+  const order = Object.keys(rooms).sort((a, b) =>
+    Math.min(...rooms[a].map(s => STATES[s.state].rank)) - Math.min(...rooms[b].map(s => STATES[s.state].rank)));
+  $('floor').innerHTML = order.map(cwd => {
+    const list = rooms[cwd];
+    if (!list.some(s => vis.has(s.id))) return '';
+    const attn = list.filter(s => s.state === 'attention').length;
+    return `<section class="room ${attn ? 'hot' : ''}" style="--n:${Math.min(list.length, 6)}" title="${esc(list[0].cwd)}">
+      <div class="room-head"><div class="sign pixel">${esc(list[0].project)}</div>${attn ? `<span class="cnt pixel">${attn}!</span>` : ''}</div>
+      <div class="desks">${list.map(s => desk(s, vis.has(s.id))).join('')}</div></section>`;
+  }).join('') || `<div class="no-sessions">No sessions match.</div>`;
+}
+
+function desk(s, shown) {
+  const st = STATES[s.state];
+  return `<div class="desk ${ui.sel === s.id ? 'sel' : ''} ${shown ? '' : 'dim'}" data-id="${s.id}">
+    ${ui.pinned.has(s.id) ? '<span class="pin">📌</span>' : ''}${isStale(s) ? '<span class="stale pixel">STALE</span>' : ''}
+    ${sprite(s)}
+    <div class="plate"><div class="n pixel"><span>${esc(s.name)}</span><span class="state-tag" style="background:${st.color}">${st.label}</span></div>
+      <div class="m" title="${esc(label(s))}">${esc(label(s))}</div>
+      <div class="m">${esc(shortModel(s.model))} · ${s.shortId} · ${ago(s.since)}</div></div></div>`;
+}
+
+function renderPanel() {
+  const s = sessions.find(x => x.id === ui.sel);
+  $('aside').classList.toggle('open', !!s);
+  if (!s || document.activeElement?.id === 'note') return; // don't clobber a note mid-typing
+  const st = STATES[s.state], b = s.brief, tk = s.tokens;
+  const pct = tk ? Math.min(100, Math.round(tk.context / tk.window * 100)) : 0;
+  const ctxColor = pct > 80 ? 'var(--attn)' : pct > 60 ? '#f3c84b' : 'var(--work)';
+  const done = s.todos.filter(t => t.status === 'completed').length;
+  $('pane').innerHTML = `
+    <button class="close" data-act="close">✕</button>
+    <h2 class="pixel">${esc(label(s))}</h2>
+    <div class="sub"><span class="state-tag pixel" style="background:${st.color}">${st.label}</span> for ${ago(s.since)} · ${esc(s.name)} · ${esc(shortModel(s.model))}</div>
+    <div class="speech"><div class="who pixel">${esc(s.name.toUpperCase())} SAYS:</div>${esc(b.headline)}
+      ${b.quote ? `<div class="quote">${esc(b.quote)}</div>` : ''}</div>
+    ${s.state === 'attention' ? `<div class="ask"><div class="pixel">WAITING ON YOU · ${esc(s.waitingFor.toUpperCase())}</div>
+      ${b.pendingTool ? esc(b.pendingTool.summary) : ''}${b.pendingTool?.detail ? `<code>${esc(b.pendingTool.detail)}</code>` : ''}
+      <div class="hint">Answer it in the terminal running this session (PID ${s.pid}).</div></div>` : ''}
+    ${isStale(s) ? `<div class="ask" style="border-color:#f3c84b;background:#2b2410"><div class="pixel" style="color:#f3c84b">STALE</div>Idle for ${ago(s.since)}. Kill it to free memory, or give it a new task.</div>` : ''}
+    ${s.todos.length ? `<div class="sec pixel">PROGRESS ${done}/${s.todos.length}</div>
+      ${s.todos.map(t => `<div class="todo ${t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : ''}">${t.status === 'completed' ? '■' : t.status === 'in_progress' ? '▶' : '□'} ${esc(t.text)}</div>`).join('')}` : ''}
+    ${s.lastPrompt ? `<div class="sec pixel">YOUR LAST PROMPT</div><div class="prompt">${esc(clip(s.lastPrompt, 600))}</div>` : ''}
+    ${tk ? `<div class="sec pixel">CONTEXT WINDOW</div>
+      <div class="meter"><i style="width:${pct}%;background:${ctxColor}"></i></div>
+      <div style="color:var(--dim);margin-top:4px">${pct}% of ${fmtK(tk.window)}${pct > 80 ? ' · consider /compact' : ''} · ${fmtK(tk.context)} in context · ${fmtK(tk.output)} tokens out</div>` : ''}
+    <div class="sec pixel">WHERE</div>
+    <div class="kv"><span>folder</span><span>${esc(s.cwd)}</span>
+      <span>branch</span><span>${esc(s.branch || '—')}</span>
+      <span>session</span><span>${s.id}</span>
+      <span>process</span><span>PID ${s.pid} · ${esc(s.kind)} · v${esc(s.version)}</span>
+      <span>started</span><span>${ago(s.startedAt)} ago</span>
+      ${s.files.length ? `<span>edited</span><span>${s.files.map(esc).join(', ')}</span>` : ''}</div>
+    ${s.timeline.length ? `<div class="sec pixel">ACTIVITY</div>
+      <div class="tl">${[...s.timeline].reverse().map(e => `<div>${esc(e.msg)}<small>${ago(e.t)} ago</small></div>`).join('')}</div>` : ''}
+    <div class="sec pixel">MY NOTES</div>
+    <textarea id="note" placeholder="Private note for this session…">${esc(localStorage.getItem('note:' + s.id) || '')}</textarea>
+    <div class="sec pixel">ACTIONS</div>
+    <div class="actions">
+      <button class="btn" data-act="resume">Copy resume cmd</button>
+      <button class="btn" data-act="pin">${ui.pinned.has(s.id) ? 'Unpin' : 'Pin to top'}</button>
+      <button class="btn" data-act="folder">Open folder</button>
+      <button class="btn danger" data-act="kill">Kill session</button>
+    </div>`;
+  $('note').oninput = e => localStorage.setItem('note:' + s.id, e.target.value);
+}
+
+function render() { renderHeader(); renderQueue(); renderFloor(); renderPanel(); }
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 3500);
+}
+function beep() {
+  if (!$('sound').checked) return;
+  const a = new AudioContext(), o = a.createOscillator(), g = a.createGain();
+  o.type = 'square'; o.frequency.value = 880; g.gain.value = .05;
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + .12);
+}
+function select(id) { ui.sel = id || null; history.replaceState(null, '', id ? '#' + id : location.pathname); render(); }
+
+function applySnapshot(list) {
+  if (ui.loaded) {
+    const before = new Map(sessions.map(s => [s.id, s.state]));
+    const fresh = list.filter(s => s.state === 'attention' && before.get(s.id) !== 'attention');
+    if (fresh.length) { beep(); toast(`🔴 ${fresh[0].name} needs you: ${clip(label(fresh[0]), 60)}`); }
+  }
+  sessions = list;
+  if (!ui.loaded) {
+    ui.loaded = true;
+    const h = location.hash.slice(1);
+    if (sessions.some(s => s.id === h)) ui.sel = h;
+  }
+  if (ui.sel && !sessions.some(s => s.id === ui.sel)) select(null); else render();
+}
+
+function connect() {
+  const es = new EventSource('/api/events');
+  es.onopen = () => { ui.connected = true; renderHeader(); };
+  es.onmessage = e => applySnapshot(JSON.parse(e.data));
+  es.onerror = () => { ui.connected = false; renderHeader(); }; // EventSource retries on its own
+}
+
+async function post(s, verb) {
+  const res = await fetch(`/api/sessions/${s.id}/${verb}`, { method: 'POST', headers: { 'X-Agent-HQ': '1' } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+// Ending the process is irreversible for in-flight work, so always confirm; the transcript survives for --resume.
+function openKill(s) {
+  const risk = s.state === 'working' ? `<p><b style="color:var(--attn)">It is mid-task.</b> Whatever it is doing right now stops immediately.</p>`
+    : s.state === 'attention' ? `<p>It is waiting on you (${esc(s.waitingFor)}). That request will be dropped.</p>` : '';
+  $('modalBody').innerHTML = `<h3 class="pixel">KILL SESSION?</h3>
+    <p>This ends the Claude process <b>${esc(s.name)}</b> (PID ${s.pid}) working in <code>${esc(s.cwd)}</code>.</p>${risk}
+    <p style="color:var(--dim)">The transcript is kept. You can bring it back with <code>claude --resume ${s.id}</code>.</p>
+    <div class="actions"><button class="btn" data-act="kill-cancel">Cancel</button><button class="btn primary" data-act="kill-confirm">Kill it</button></div>`;
+  ui.killTarget = s;
+  $('modal').classList.add('open');
+  $('modalBody').querySelector('[data-act="kill-confirm"]').focus();
+}
+function closeModal() { $('modal').classList.remove('open'); ui.killTarget = null; }
+
+async function confirmKill() {
+  const s = ui.killTarget;
+  closeModal();
+  document.querySelector(`.desk[data-id="${s.id}"]`)?.classList.add('dying');
+  try {
+    await post(s, 'kill');
+    toast(`💀 Killed ${s.name}. Resume anytime with claude --resume ${s.id}`);
+  } catch (e) {
+    document.querySelector(`.desk[data-id="${s.id}"]`)?.classList.remove('dying');
+    toast(`Could not kill ${s.name}: ${e.message}`);
+  }
+}
+
+document.addEventListener('click', e => {
+  if (e.target.id === 'modal') return closeModal();
+  const f = e.target.closest('[data-f]'); if (f) { ui.filter = f.dataset.f; return render(); }
+  const d = e.target.closest('[data-id]'); if (d) return select(d.dataset.id);
+  const a = e.target.closest('[data-act]'); if (!a) return;
+  const s = sessions.find(x => x.id === ui.sel);
+  ({
+    close: () => select(null),
+    resume: () => { navigator.clipboard?.writeText(`cd "${s.cwd}"; claude --resume ${s.id}`); toast('Copied: claude --resume ' + s.id); },
+    pin: () => { ui.pinned.has(s.id) ? ui.pinned.delete(s.id) : ui.pinned.add(s.id); localStorage.setItem('pins', JSON.stringify([...ui.pinned])); render(); },
+    folder: () => post(s, 'open-folder').catch(err => toast('Could not open folder: ' + err.message)),
+    kill: () => openKill(s),
+    'kill-cancel': closeModal,
+    'kill-confirm': confirmKill,
+  })[a.dataset.act]?.();
+});
+$('search').oninput = e => { ui.q = e.target.value; render(); };
+$('sort').onchange = e => { ui.sort = e.target.value; render(); };
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select')) { if (e.key === 'Escape') e.target.blur(); return; }
+  if ($('modal').classList.contains('open')) { if (e.key === 'Escape') closeModal(); return; }
+  const list = sorted(visible()), i = list.findIndex(s => s.id === ui.sel);
+  if (e.key === '/') { e.preventDefault(); $('search').focus(); }
+  else if (e.key === 'Escape') select(null);
+  else if (e.key === 'j') select(list[Math.min(i + 1, list.length - 1)]?.id);
+  else if (e.key === 'k') select(list[Math.max(i - 1, 0)]?.id);
+  else if (e.key === 'x' && ui.sel) openKill(sessions.find(s => s.id === ui.sel));
+  else if (e.key === 'a') { const n = sessions.filter(s => s.state === 'attention').sort((a, b) => a.since - b.since)[0]; n ? select(n.id) : toast('Nobody needs you 🎉'); }
+});
+
+setInterval(render, 30_000); // keep "12m ago" labels fresh between server pushes
+render();
+connect();
+</script>
+</body>
+</html>
